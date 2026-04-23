@@ -600,13 +600,27 @@ def render_message(msg):
     elif msg_type == "chart" and data:
         st.markdown(content)
         chart_type = msg.get("chart_type", "holdings")
+        fig = None
         if chart_type == "sector":
             if st.session_state.sector_data:
                 fig = dt.generate_sector_chart(data, st.session_state.sector_data)
-                st.pyplot(fig)
         else:
             fig = dt.generate_holdings_chart(data)
+        if fig:
             st.pyplot(fig)
+            import io
+            buf = io.BytesIO()
+            fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+            buf.seek(0)
+            safe_name = re.sub(r'[^\w\s-]', '', data['fund_name']).strip().replace(' ', '_')
+            label = "sector_chart" if chart_type == "sector" else "holdings_chart"
+            st.download_button(
+                label="Download Chart as PNG",
+                data=buf,
+                file_name=f"{safe_name}_{label}.png",
+                mime="image/png",
+                key=f"dl_chart_{chart_type}_{hash(content)}",
+            )
 
     elif msg_type == "report_download":
         st.markdown(content)
