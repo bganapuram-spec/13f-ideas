@@ -12,6 +12,7 @@ Usage:
 
 import os
 import re
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -909,7 +910,7 @@ def process_input(user_input):
 
             # Generate PDF
             with st.spinner("Compiling PDF..."):
-                output_dir = Path.home() / "Desktop"
+                output_dir = Path(tempfile.gettempdir())
                 safe_name = re.sub(r'[^\w\s-]', '', data['fund_name']).strip().replace(' ', '_')
                 date_str = datetime.now().strftime("%Y%m%d")
                 output_path = output_dir / f"{safe_name}_13F_Report_{date_str}.pdf"
@@ -1083,7 +1084,7 @@ def process_input(user_input):
                 domain_safe = urlparse(url).netloc.replace(".", "_")
                 kind = "team" if mode == "team" else "portfolio"
                 filename = f"Wayback_{domain_safe}_{kind}_{datetime.now().strftime('%Y%m%d')}.pdf"
-                output_path = Path.home() / "Desktop" / filename
+                output_path = Path(tempfile.gettempdir()) / filename
 
                 # Parse years from period
                 period = result.get("period", "")
