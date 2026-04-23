@@ -80,12 +80,13 @@ def print_step(step, text):
 USER_AGENT = "13FTopIdeas research@13ftopideas.com"
 SEC_RATE_LIMIT_SLEEP = 0.15
 
-# Google Gemini API (free tier)
-GEMINI_MODEL = "gemini-2.0-flash"
+# Groq API (free tier)
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+LLM_MODEL = "llama-3.1-8b-instant"
 
-def _get_gemini_key():
-    """Get Gemini API key from environment."""
-    return os.environ.get("GEMINI_API_KEY", "")
+def _get_api_key():
+    """Get Groq API key from environment."""
+    return os.environ.get("GROQ_API_KEY", "")
 
 FUND_ALIASES = {
     "viking": "VIKING GLOBAL INVESTORS",
@@ -115,43 +116,43 @@ FUND_ALIASES = {
 }
 
 # ---------------------------------------------------------------------------
-# Google Gemini LLM (free tier)
+# Groq LLM (free tier)
 # ---------------------------------------------------------------------------
 
 def check_ollama():
-    """Check if Gemini API key is configured."""
-    return bool(_get_gemini_key())
+    """Check if Groq API key is configured."""
+    return bool(_get_api_key())
 
 def get_available_model():
-    """Return the Gemini model name."""
-    return GEMINI_MODEL
+    """Return the model name."""
+    return LLM_MODEL
 
 def llm_generate(prompt, system_prompt=None, stream=True):
-    """Generate text using Google Gemini. Streams to terminal if stream=True."""
-    api_key = _get_gemini_key()
+    """Generate text using Groq API. Streams to terminal if stream=True."""
+    api_key = _get_api_key()
     if not api_key:
-        print_error("GEMINI_API_KEY not set. Export it: export GEMINI_API_KEY=your_key")
+        print_error("GROQ_API_KEY not set. Export it: export GROQ_API_KEY=your_key")
         return ""
 
-    contents = []
+    messages = []
     if system_prompt:
-        contents.append({"role": "user", "parts": [{"text": system_prompt}]})
-        contents.append({"role": "model", "parts": [{"text": "Understood. I will follow these instructions."}]})
-    contents.append({"role": "user", "parts": [{"text": prompt}]})
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
 
     try:
         if stream:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:streamGenerateContent?alt=sse&key={api_key}"
             full_text = ""
             resp = requests.post(
-                url,
-                headers={"Content-Type": "application/json"},
-                json={
-                    "contents": contents,
-                    "generationConfig": {"temperature": 0.7, "maxOutputTokens": 500},
-                },
-                stream=True,
-                timeout=120,
+                GROQ_API_URL,
+                headers=headers,
+                json={"model": LLM_MODEL, "messages": messages,
+                      "temperature": 0.7, "max_tokens": 500, "stream": True},
+                stream=True, timeout=120,
             )
             for line in resp.iter_lines():
                 if line:
@@ -162,26 +163,24 @@ def llm_generate(prompt, system_prompt=None, stream=True):
                         break
                     try:
                         chunk = json.loads(line_str)
-                        token = chunk["candidates"][0]["content"]["parts"][0]["text"]
-                        print(token, end="", flush=True)
-                        full_text += token
+                        token = chunk["choices"][0]["delta"].get("content", "")
+                        if token:
+                            print(token, end="", flush=True)
+                            full_text += token
                     except (json.JSONDecodeError, KeyError, IndexError):
                         continue
             print()
             return full_text
         else:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={api_key}"
             resp = requests.post(
-                url,
-                headers={"Content-Type": "application/json"},
-                json={
-                    "contents": contents,
-                    "generationConfig": {"temperature": 0.7, "maxOutputTokens": 500},
-                },
+                GROQ_API_URL,
+                headers=headers,
+                json={"model": LLM_MODEL, "messages": messages,
+                      "temperature": 0.7, "max_tokens": 500},
                 timeout=120,
             )
             data = resp.json()
-            return data["candidates"][0]["content"]["parts"][0]["text"]
+            return data["choices"][0]["message"]["content"]
     except Exception as e:
         print_error(f"LLM generation failed: {e}")
         return ""
@@ -1068,7 +1067,7 @@ def interactive_loop():
 
     # Check Ollama
     if check_ollama():
-        print_success(f"Gemini connected (model: {get_available_model()})")
+        print_success(f"Groq connected (model: {get_available_model()})")
     else:
         print_warn("GEMINI_API_KEY not set. LLM features disabled. Export it: export GEMINI_API_KEY=your_key")
         print_info("Data fetching and display will still work fine.")
@@ -1194,7 +1193,7 @@ def interactive_loop():
                 print_warn("No fund loaded. Enter a fund name first.")
                 continue
             if not check_ollama():
-                print_error("GEMINI_API_KEY not set. Export it: export GEMINI_API_KEY=your_key")
+                print_error("GROQ_API_KEY not set. Export it: export GROQ_API_KEY=your_key")
                 continue
 
             print_header(f"Generating investment theses for {current_data.fund_name} top {len(current_data.top_holdings)} holdings...")
@@ -1216,7 +1215,7 @@ def interactive_loop():
                 print_warn("No fund loaded. Enter a fund name first.")
                 continue
             if not check_ollama():
-                print_error("GEMINI_API_KEY not set. Export it: export GEMINI_API_KEY=your_key")
+                print_error("GROQ_API_KEY not set. Export it: export GROQ_API_KEY=your_key")
                 continue
             parts = cmd.split()
             if len(parts) < 2 or not parts[1].isdigit():
@@ -1277,7 +1276,7 @@ def interactive_loop():
                 print_warn("No fund loaded. Enter a fund name first.")
                 continue
             if not check_ollama():
-                print_error("GEMINI_API_KEY not set. Export it: export GEMINI_API_KEY=your_key")
+                print_error("GROQ_API_KEY not set. Export it: export GROQ_API_KEY=your_key")
                 continue
 
             question = user_input[4:].strip()

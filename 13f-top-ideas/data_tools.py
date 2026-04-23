@@ -21,18 +21,19 @@ import xml.etree.ElementTree as ET
 USER_AGENT = "13FTopIdeas research@13ftopideas.com"
 SEC_RATE_LIMIT_SLEEP = 0.15
 
-# Google Gemini API (free tier) — replaces local Ollama
-GEMINI_MODEL = "gemini-2.0-flash"
+# Groq API (free tier — 14,400 req/day, 30 req/min)
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+LLM_MODEL = "llama-3.1-8b-instant"
 
-def _get_gemini_key():
-    """Get Gemini API key from Streamlit secrets or environment."""
+def _get_api_key():
+    """Get Groq API key from Streamlit secrets or environment."""
     try:
         import streamlit as st
-        if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
-            return st.secrets["GEMINI_API_KEY"]
+        if hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
+            return st.secrets["GROQ_API_KEY"]
     except Exception:
         pass
-    return os.environ.get("GEMINI_API_KEY", "")
+    return os.environ.get("GROQ_API_KEY", "")
 
 FUND_ALIASES = {
     "viking": "VIKING GLOBAL INVESTORS",
@@ -91,98 +92,94 @@ PORTFOLIO_URL_KEYWORDS = [
 
 
 # ---------------------------------------------------------------------------
-# Google Gemini LLM (free tier)
+# Groq LLM (free tier — OpenAI-compatible API)
 # ---------------------------------------------------------------------------
 
 def check_llm():
-    """Check if Gemini API key is configured."""
-    return bool(_get_gemini_key())
+    """Check if Groq API key is configured."""
+    return bool(_get_api_key())
 
 
 def get_available_model():
-    """Return the Gemini model name."""
-    return GEMINI_MODEL
+    """Return the model name."""
+    return LLM_MODEL
 
 
 def llm_generate(prompt, system_prompt=None, _retries=3):
-    """Generate text using Google Gemini API. Retries on rate limit."""
+    """Generate text using Groq API. Retries on rate limit."""
     import logging
     logger = logging.getLogger(__name__)
 
-    api_key = _get_gemini_key()
+    api_key = _get_api_key()
     if not api_key:
-        logger.warning("GEMINI_API_KEY not found in secrets or environment")
-        return "[Error: GEMINI_API_KEY not configured]"
+        logger.warning("GROQ_API_KEY not found in secrets or environment")
+        return "[Error: GROQ_API_KEY not configured]"
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={api_key}"
-
-    contents = []
+    messages = []
     if system_prompt:
-        contents.append({"role": "user", "parts": [{"text": system_prompt}]})
-        contents.append({"role": "model", "parts": [{"text": "Understood. I will follow these instructions."}]})
-    contents.append({"role": "user", "parts": [{"text": prompt}]})
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
 
     payload = {
-        "contents": contents,
-        "generationConfig": {
-            "temperature": 0.7,
-            "maxOutputTokens": 500,
-        },
+        "model": LLM_MODEL,
+        "messages": messages,
+        "temperature": 0.7,
+        "max_tokens": 500,
     }
 
     for attempt in range(_retries):
         try:
             resp = requests.post(
-                url,
-                headers={"Content-Type": "application/json"},
+                GROQ_API_URL,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
                 json=payload,
                 timeout=120,
             )
             if resp.status_code == 429:
-                wait = 10 * (attempt + 1)
+                wait = 5 * (attempt + 1)
                 logger.warning(f"Rate limited, waiting {wait}s (attempt {attempt+1}/{_retries})")
                 time.sleep(wait)
                 continue
             if resp.status_code != 200:
-                logger.error(f"Gemini API error {resp.status_code}: {resp.text[:500]}")
-                return f"[Error: Gemini API returned {resp.status_code}]"
+                logger.error(f"Groq API error {resp.status_code}: {resp.text[:500]}")
+                return f"[Error: Groq API returned {resp.status_code}]"
             data = resp.json()
-            if "candidates" not in data or not data["candidates"]:
-                logger.error(f"Gemini returned no candidates: {data}")
-                return "[Error: Gemini returned no response]"
-            return data["candidates"][0]["content"]["parts"][0]["text"]
+            return data["choices"][0]["message"]["content"]
         except Exception as e:
-            logger.error(f"Gemini API exception: {e}")
+            logger.error(f"Groq API exception: {e}")
             return f"[Error: {e}]"
 
     return "[Error: Rate limited after retries — try again in a minute]"
 
 
 def llm_generate_stream(prompt, system_prompt=None):
-    """Generate text using Gemini API with streaming. Yields tokens."""
-    api_key = _get_gemini_key()
+    """Generate text using Groq API with streaming. Yields tokens."""
+    api_key = _get_api_key()
     if not api_key:
         yield ""
         return
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:streamGenerateContent?alt=sse&key={api_key}"
-
-    contents = []
+    messages = []
     if system_prompt:
-        contents.append({"role": "user", "parts": [{"text": system_prompt}]})
-        contents.append({"role": "model", "parts": [{"text": "Understood. I will follow these instructions."}]})
-    contents.append({"role": "user", "parts": [{"text": prompt}]})
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
 
     try:
         resp = requests.post(
-            url,
-            headers={"Content-Type": "application/json"},
+            GROQ_API_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
             json={
-                "contents": contents,
-                "generationConfig": {
-                    "temperature": 0.7,
-                    "maxOutputTokens": 500,
-                },
+                "model": LLM_MODEL,
+                "messages": messages,
+                "temperature": 0.7,
+                "max_tokens": 500,
+                "stream": True,
             },
             stream=True,
             timeout=120,
@@ -196,18 +193,18 @@ def llm_generate_stream(prompt, system_prompt=None):
                     break
                 try:
                     chunk = json.loads(line_str)
-                    text = chunk["candidates"][0]["content"]["parts"][0]["text"]
-                    if text:
-                        yield text
+                    token = chunk["choices"][0]["delta"].get("content", "")
+                    if token:
+                        yield token
                 except (json.JSONDecodeError, KeyError, IndexError):
                     continue
     except Exception:
         yield ""
 
 
-def llm_generate_thesis(holding, fund_name, _delay=4):
+def llm_generate_thesis(holding, fund_name, _delay=2):
     """Generate a 150-200 word investment thesis for a holding."""
-    time.sleep(_delay)  # Respect Gemini free tier rate limit (15 req/min)
+    time.sleep(_delay)  # Respect Groq free tier rate limit (30 req/min)
     system_prompt = (
         "You are a senior equity research analyst writing concise investment thesis notes. "
         "Write as a thoughtful analyst would - not promotional. "

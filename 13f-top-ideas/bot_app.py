@@ -621,7 +621,7 @@ with st.sidebar:
         st.success(f"AI: {dt.get_available_model()}", icon="\u2705")
     else:
         st.warning("AI: No API key", icon="\u26A0\uFE0F")
-        st.caption("Set GEMINI_API_KEY in secrets")
+        st.caption("Set GROQ_API_KEY in secrets")
         if st.button("Retry", key="retry_llm"):
             st.session_state.llm_available = dt.check_llm()
             st.rerun()
@@ -850,7 +850,7 @@ def process_input(user_input):
         if not st.session_state.llm_available:
             add_msg("assistant",
                 "I need an AI API key to generate investment theses. "
-                "Please set your GEMINI_API_KEY in Streamlit secrets."
+                "Please set your GROQ_API_KEY in Streamlit secrets."
             )
             st.rerun()
             return
@@ -898,7 +898,7 @@ def process_input(user_input):
                        or st.session_state.theses.get(h["cusip"], "").startswith("[Error:")]
             if missing:
                 if not st.session_state.llm_available:
-                    st.warning("GEMINI_API_KEY not set — PDF will be generated without AI theses.")
+                    st.warning("GROQ_API_KEY not set — PDF will be generated without AI theses.")
                 else:
                     st.markdown(f"Writing investment theses for {len(missing)} positions...")
                     for h in missing:
@@ -1174,7 +1174,7 @@ def process_input(user_input):
         else:
             add_msg("assistant",
                 "I'd love to answer that, but AI features aren't configured yet. "
-                "Set your GEMINI_API_KEY in Streamlit secrets for free-form Q&A.\n\n"
+                "Set your GROQ_API_KEY in Streamlit secrets for free-form Q&A.\n\n"
                 "In the meantime, try asking about **holdings**, **sectors**, or **thesis**."
             )
         st.rerun()
