@@ -1198,6 +1198,159 @@ def extract_companies(html):
 
 
 # ---------------------------------------------------------------------------
+# Chart Generation (returns matplotlib figure for Streamlit)
+# ---------------------------------------------------------------------------
+
+def generate_holdings_chart(data):
+    """Generate a stacked bar chart of top 10 holdings % across quarters.
+    Works with the dict-based data format from fetch_fund_data().
+    Returns a matplotlib Figure.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.cm as cm
+
+    quarters_data = data["quarters_data"]
+    filings = data["filings"]
+    top_holdings = data["top_holdings"]
+
+    quarter_labels = [f["report_date"] for f in filings]
+    top10 = [(h["cusip"], h["ticker"] or h["name"][:12]) for h in top_holdings[:10]]
+
+    chart_data = {key: [] for key in top10}
+    other_pcts = []
+
+    for qd in quarters_data:
+        if qd is None:
+            for key in top10:
+                chart_data[key].append(0)
+            other_pcts.append(0)
+            continue
+        total_val = sum(h["value"] for h in qd.values())
+        if total_val == 0:
+            for key in top10:
+                chart_data[key].append(0)
+            other_pcts.append(0)
+            continue
+        top10_total = 0
+        for cusip, label in top10:
+            if cusip in qd:
+                pct = qd[cusip]["value"] / total_val * 100
+                chart_data[(cusip, label)].append(pct)
+                top10_total += pct
+            else:
+                chart_data[(cusip, label)].append(0)
+        other_pcts.append(max(0, 100 - top10_total))
+
+    quarter_labels = list(reversed(quarter_labels))
+    other_pcts = list(reversed(other_pcts))
+    for key in chart_data:
+        chart_data[key] = list(reversed(chart_data[key]))
+
+    fig, ax = plt.subplots(figsize=(12, 7))
+    x = range(len(quarter_labels))
+    colors = cm.tab20(range(11))
+    bottom = [0] * len(quarter_labels)
+
+    for i, (key, pcts) in enumerate(chart_data.items()):
+        _, label = key
+        ax.bar(x, pcts, bottom=bottom, color=colors[i], label=label, width=0.6)
+        bottom = [b + p for b, p in zip(bottom, pcts)]
+
+    ax.bar(x, other_pcts, bottom=bottom, color=colors[10], label="Other", width=0.6)
+
+    ax.set_xlabel("Quarter End", fontsize=12)
+    ax.set_ylabel("% of Portfolio", fontsize=12)
+    ax.set_title(f"{data['fund_name']} - Top 10 Holdings by Quarter",
+                 fontsize=14, fontweight="bold")
+    ax.set_xticks(x)
+    ax.set_xticklabels(quarter_labels, rotation=45, ha="right")
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), fontsize=8)
+    ax.set_ylim(0, 105)
+    plt.tight_layout()
+    return fig
+
+
+def generate_sector_chart(data, sector_data):
+    """Generate a stacked bar chart of sector allocation across quarters.
+    Works with the dict-based data format from fetch_fund_data().
+    Returns a matplotlib Figure.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.cm as cm
+
+    quarters_data = data["quarters_data"]
+    filings = data["filings"]
+
+    cusip_ticker = {}
+    for h in data["top_holdings"]:
+        if h["ticker"]:
+            cusip_ticker[h["cusip"]] = h["ticker"]
+
+    quarter_labels = [f["report_date"] for f in filings]
+
+    all_sectors = set()
+    quarter_sector_pcts = []
+
+    for qd in quarters_data:
+        sector_pcts = {}
+        if qd is None:
+            quarter_sector_pcts.append({})
+            continue
+        total_val = sum(h["value"] for h in qd.values())
+        if total_val == 0:
+            quarter_sector_pcts.append({})
+            continue
+        for cusip, holding in qd.items():
+            ticker = cusip_ticker.get(cusip, "")
+            sd = sector_data.get(ticker, {"sector": "Unknown"})
+            sector = sd.get("sector", "Unknown") if isinstance(sd, dict) else "Unknown"
+            pct = holding["value"] / total_val * 100
+            sector_pcts[sector] = sector_pcts.get(sector, 0) + pct
+            all_sectors.add(sector)
+        quarter_sector_pcts.append(sector_pcts)
+
+    current_pcts = quarter_sector_pcts[0] if quarter_sector_pcts else {}
+    sorted_sectors = sorted(all_sectors, key=lambda s: current_pcts.get(s, 0), reverse=True)
+    top_sectors = sorted_sectors[:10]
+    if len(sorted_sectors) > 10:
+        top_sectors.append("Other Sectors")
+
+    quarter_labels = list(reversed(quarter_labels))
+    quarter_sector_pcts = list(reversed(quarter_sector_pcts))
+
+    fig, ax = plt.subplots(figsize=(12, 7))
+    x = range(len(quarter_labels))
+    colors = cm.Set3(range(len(top_sectors)))
+    bottom = [0] * len(quarter_labels)
+
+    for i, sector in enumerate(top_sectors):
+        pcts = []
+        for qsp in quarter_sector_pcts:
+            if sector == "Other Sectors":
+                other_total = sum(v for k, v in qsp.items() if k not in sorted_sectors[:10])
+                pcts.append(other_total)
+            else:
+                pcts.append(qsp.get(sector, 0))
+        ax.bar(x, pcts, bottom=bottom, color=colors[i], label=sector, width=0.6)
+        bottom = [b + p for b, p in zip(bottom, pcts)]
+
+    ax.set_xlabel("Quarter End", fontsize=12)
+    ax.set_ylabel("% of Portfolio", fontsize=12)
+    ax.set_title(f"{data['fund_name']} - Sector Allocation by Quarter",
+                 fontsize=14, fontweight="bold")
+    ax.set_xticks(x)
+    ax.set_xticklabels(quarter_labels, rotation=45, ha="right")
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), fontsize=8)
+    ax.set_ylim(0, 105)
+    plt.tight_layout()
+    return fig
+
+
+# ---------------------------------------------------------------------------
 # PDF Report Generation
 # ---------------------------------------------------------------------------
 

@@ -424,6 +424,13 @@ def classify_intent(user_input):
                                  "make a report", "print", "give me a report"]):
         return ("report", {})
 
+    # --- Chart ---
+    if any(w in lower for w in ["chart", "graph", "bar chart", "stacked", "visualize",
+                                 "plot", "show chart", "holdings chart", "visual"]):
+        if any(w in lower for w in ["sector", "industry", "allocation"]):
+            return ("sector_chart", {})
+        return ("chart", {})
+
     # --- Sectors ---
     if any(w in lower for w in ["sector", "industry", "industries", "sector breakdown",
                                  "sector analysis", "what sectors", "sector allocation",
@@ -590,6 +597,17 @@ def render_message(msg):
                 })
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
+    elif msg_type == "chart" and data:
+        st.markdown(content)
+        chart_type = msg.get("chart_type", "holdings")
+        if chart_type == "sector":
+            if st.session_state.sector_data:
+                fig = dt.generate_sector_chart(data, st.session_state.sector_data)
+                st.pyplot(fig)
+        else:
+            fig = dt.generate_holdings_chart(data)
+            st.pyplot(fig)
+
     elif msg_type == "report_download":
         st.markdown(content)
         # Show download button if file exists
@@ -649,12 +667,18 @@ with st.sidebar:
             if st.button("Sectors", key="qa_sectors", use_container_width=True):
                 st.session_state.pending_action = "Sector breakdown"
                 st.rerun()
+            if st.button("Holdings Chart", key="qa_chart", use_container_width=True):
+                st.session_state.pending_action = "Show holdings chart"
+                st.rerun()
         with qcols[1]:
             if st.button("Theses", key="qa_thesis", use_container_width=True):
                 st.session_state.pending_action = "Generate investment theses for top 5"
                 st.rerun()
             if st.button("PDF Report", key="qa_report", use_container_width=True):
                 st.session_state.pending_action = "Generate full PDF report"
+                st.rerun()
+            if st.button("Sector Chart", key="qa_sector_chart", use_container_width=True):
+                st.session_state.pending_action = "Show sector allocation chart"
                 st.rerun()
 
         st.caption("")  # spacer
@@ -842,6 +866,44 @@ def process_input(user_input):
             + "\n".join(alloc_lines)
         )
         add_msg("assistant", summary, msg_type="sectors")
+        st.rerun()
+        return
+
+    # --- Holdings Chart ---
+    if intent == "chart":
+        if not data:
+            add_msg("assistant", "Load a fund first, then ask for a chart.")
+            st.rerun()
+            return
+        with st.chat_message("assistant"):
+            with st.spinner("Generating holdings chart..."):
+                fig = dt.generate_holdings_chart(data)
+            st.pyplot(fig)
+        add_msg("assistant",
+                f"**{data['fund_name']} — Top 10 Holdings by Quarter**",
+                msg_type="chart")
+        st.session_state.messages[-1]["chart_type"] = "holdings"
+        st.rerun()
+        return
+
+    # --- Sector Chart ---
+    if intent == "sector_chart":
+        if not data:
+            add_msg("assistant", "Load a fund first, then ask for a sector chart.")
+            st.rerun()
+            return
+        # Fetch sector data if not already loaded
+        if not st.session_state.sector_data:
+            with st.spinner("Fetching sector data..."):
+                st.session_state.sector_data = dt.fetch_sector_data(data["top_holdings"])
+        with st.chat_message("assistant"):
+            with st.spinner("Generating sector chart..."):
+                fig = dt.generate_sector_chart(data, st.session_state.sector_data)
+            st.pyplot(fig)
+        add_msg("assistant",
+                f"**{data['fund_name']} — Sector Allocation by Quarter**",
+                msg_type="chart")
+        st.session_state.messages[-1]["chart_type"] = "sector"
         st.rerun()
         return
 
