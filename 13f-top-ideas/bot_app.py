@@ -619,7 +619,7 @@ def render_message(msg):
                 data=buf,
                 file_name=f"{safe_name}_{label}.png",
                 mime="image/png",
-                key=f"dl_chart_{chart_type}_{hash(content)}",
+                key=f"dl_chart_{chart_type}_{id(msg)}",
             )
 
     elif msg_type == "report_download":
