@@ -1305,7 +1305,10 @@ def generate_pdf(holdings, fund_name, report_date, filing_date, total_value,
                      new_x="LMARGIN", new_y="NEXT")
 
             pdf.set_font("Helvetica", "", 8)
-            thesis = theses.get(h["cusip"], "Thesis analysis not available.")
+            thesis = theses.get(h["cusip"], "") or ""
+            thesis = thesis.strip()
+            if not thesis:
+                thesis = "Thesis analysis not available. Generate theses first using the thesis command."
             thesis = thesis.encode('latin-1', errors='replace').decode('latin-1')
             pdf.multi_cell(0, 4.5, thesis)
             pdf.ln(5)

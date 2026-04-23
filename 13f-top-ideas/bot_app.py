@@ -874,7 +874,10 @@ def process_input(user_input):
                 st.markdown(f"**#{h['rank']}. {h['name']} ({ticker})**")
                 with st.spinner(f"Writing thesis for {ticker}..."):
                     thesis = dt.llm_generate_thesis(h, data["fund_name"])
-                    st.session_state.theses[h["cusip"]] = thesis
+                    if thesis and thesis.strip():
+                        st.session_state.theses[h["cusip"]] = thesis
+                    else:
+                        thesis = "Could not generate thesis. Check your Gemini API key."
                 st.markdown(thesis)
                 if h != targets[-1]:
                     st.divider()
@@ -898,8 +901,9 @@ def process_input(user_input):
         with st.chat_message("assistant"):
             st.markdown(f"Generating full PDF report for **{data['fund_name']}**...")
 
-            # Generate theses for any holdings that don't have one yet
-            missing = [h for h in data["top_holdings"] if h["cusip"] not in st.session_state.theses]
+            # Generate theses for any holdings that don't have one yet (or had empty results)
+            missing = [h for h in data["top_holdings"]
+                       if not st.session_state.theses.get(h["cusip"], "").strip()]
             if missing:
                 st.markdown(f"Writing investment theses for {len(missing)} positions...")
                 for h in missing:
