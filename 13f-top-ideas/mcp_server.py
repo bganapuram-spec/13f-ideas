@@ -137,9 +137,9 @@ def get_holding_detail(fund_name: str, rank: int) -> dict:
 @mcp.tool()
 def generate_investment_thesis(fund_name: str, rank: int = 0) -> dict:
     """Generate an AI investment thesis for a holding. rank=0 generates for all top holdings.
-    Requires Ollama running locally."""
-    if not dt.check_ollama():
-        return {"error": "Ollama not running. Start it with: ollama serve"}
+    Requires GEMINI_API_KEY to be set."""
+    if not dt.check_llm():
+        return {"error": "GEMINI_API_KEY not set. Set it as an environment variable."}
 
     data = dt.fetch_fund_data(fund_name)
     if not data:

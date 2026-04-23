@@ -79,8 +79,13 @@ def print_step(step, text):
 
 USER_AGENT = "13FTopIdeas research@13ftopideas.com"
 SEC_RATE_LIMIT_SLEEP = 0.15
-OLLAMA_URL = "http://localhost:11434"
-OLLAMA_MODEL = "llama3.1:8b"
+
+# Google Gemini API (free tier)
+GEMINI_MODEL = "gemini-2.0-flash"
+
+def _get_gemini_key():
+    """Get Gemini API key from environment."""
+    return os.environ.get("GEMINI_API_KEY", "")
 
 FUND_ALIASES = {
     "viking": "VIKING GLOBAL INVESTORS",
@@ -110,78 +115,73 @@ FUND_ALIASES = {
 }
 
 # ---------------------------------------------------------------------------
-# Ollama LLM
+# Google Gemini LLM (free tier)
 # ---------------------------------------------------------------------------
 
 def check_ollama():
-    """Check if Ollama is running and the model is available."""
-    try:
-        resp = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
-        if resp.status_code == 200:
-            models = [m["name"] for m in resp.json().get("models", [])]
-            if any(OLLAMA_MODEL in m for m in models):
-                return True
-            print_warn(f"Model '{OLLAMA_MODEL}' not found. Available: {', '.join(models)}")
-            if models:
-                return True  # Use whatever is available
-            return False
-        return False
-    except Exception:
-        return False
+    """Check if Gemini API key is configured."""
+    return bool(_get_gemini_key())
 
 def get_available_model():
-    """Get the first available Ollama model."""
-    try:
-        resp = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
-        if resp.status_code == 200:
-            models = resp.json().get("models", [])
-            if models:
-                for m in models:
-                    if OLLAMA_MODEL in m["name"]:
-                        return m["name"]
-                return models[0]["name"]
-    except Exception:
-        pass
-    return OLLAMA_MODEL
+    """Return the Gemini model name."""
+    return GEMINI_MODEL
 
 def llm_generate(prompt, system_prompt=None, stream=True):
-    """Generate text using Ollama. Streams to terminal if stream=True."""
-    model = get_available_model()
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "stream": stream,
-        "options": {"temperature": 0.7, "num_predict": 500},
-    }
+    """Generate text using Google Gemini. Streams to terminal if stream=True."""
+    api_key = _get_gemini_key()
+    if not api_key:
+        print_error("GEMINI_API_KEY not set. Export it: export GEMINI_API_KEY=your_key")
+        return ""
+
+    contents = []
     if system_prompt:
-        payload["system"] = system_prompt
+        contents.append({"role": "user", "parts": [{"text": system_prompt}]})
+        contents.append({"role": "model", "parts": [{"text": "Understood. I will follow these instructions."}]})
+    contents.append({"role": "user", "parts": [{"text": prompt}]})
 
     try:
         if stream:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:streamGenerateContent?alt=sse&key={api_key}"
             full_text = ""
             resp = requests.post(
-                f"{OLLAMA_URL}/api/generate",
-                json=payload,
+                url,
+                headers={"Content-Type": "application/json"},
+                json={
+                    "contents": contents,
+                    "generationConfig": {"temperature": 0.7, "maxOutputTokens": 500},
+                },
                 stream=True,
                 timeout=120,
             )
             for line in resp.iter_lines():
                 if line:
-                    chunk = json.loads(line)
-                    token = chunk.get("response", "")
-                    print(token, end="", flush=True)
-                    full_text += token
-                    if chunk.get("done", False):
+                    line_str = line.decode("utf-8")
+                    if line_str.startswith("data: "):
+                        line_str = line_str[6:]
+                    if line_str.strip() == "[DONE]":
                         break
-            print()  # newline after streaming
+                    try:
+                        chunk = json.loads(line_str)
+                        token = chunk["candidates"][0]["content"]["parts"][0]["text"]
+                        print(token, end="", flush=True)
+                        full_text += token
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        continue
+            print()
             return full_text
         else:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={api_key}"
             resp = requests.post(
-                f"{OLLAMA_URL}/api/generate",
-                json=payload,
+                url,
+                headers={"Content-Type": "application/json"},
+                json={
+                    "contents": contents,
+                    "generationConfig": {"temperature": 0.7, "maxOutputTokens": 500},
+                },
                 timeout=120,
             )
-            return resp.json().get("response", "")
+            data = resp.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
     except Exception as e:
         print_error(f"LLM generation failed: {e}")
         return ""
@@ -1068,9 +1068,9 @@ def interactive_loop():
 
     # Check Ollama
     if check_ollama():
-        print_success(f"Ollama connected (model: {get_available_model()})")
+        print_success(f"Gemini connected (model: {get_available_model()})")
     else:
-        print_warn("Ollama not running. LLM features disabled. Start with: ollama serve")
+        print_warn("GEMINI_API_KEY not set. LLM features disabled. Export it: export GEMINI_API_KEY=your_key")
         print_info("Data fetching and display will still work fine.")
 
     session = make_session()
@@ -1194,7 +1194,7 @@ def interactive_loop():
                 print_warn("No fund loaded. Enter a fund name first.")
                 continue
             if not check_ollama():
-                print_error("Ollama not running. Start with: ollama serve")
+                print_error("GEMINI_API_KEY not set. Export it: export GEMINI_API_KEY=your_key")
                 continue
 
             print_header(f"Generating investment theses for {current_data.fund_name} top {len(current_data.top_holdings)} holdings...")
@@ -1216,7 +1216,7 @@ def interactive_loop():
                 print_warn("No fund loaded. Enter a fund name first.")
                 continue
             if not check_ollama():
-                print_error("Ollama not running. Start with: ollama serve")
+                print_error("GEMINI_API_KEY not set. Export it: export GEMINI_API_KEY=your_key")
                 continue
             parts = cmd.split()
             if len(parts) < 2 or not parts[1].isdigit():
@@ -1277,7 +1277,7 @@ def interactive_loop():
                 print_warn("No fund loaded. Enter a fund name first.")
                 continue
             if not check_ollama():
-                print_error("Ollama not running. Start with: ollama serve")
+                print_error("GEMINI_API_KEY not set. Export it: export GEMINI_API_KEY=your_key")
                 continue
 
             question = user_input[4:].strip()

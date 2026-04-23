@@ -5,6 +5,7 @@ No terminal UI, no print statements — pure data in, data out.
 """
 
 import json
+import os
 import re
 import time
 from datetime import datetime
@@ -19,8 +20,17 @@ import xml.etree.ElementTree as ET
 
 USER_AGENT = "13FTopIdeas research@13ftopideas.com"
 SEC_RATE_LIMIT_SLEEP = 0.15
-OLLAMA_URL = "http://localhost:11434"
-OLLAMA_MODEL = "llama3.1:8b"
+
+# Google Gemini API (free tier) — replaces local Ollama
+GEMINI_MODEL = "gemini-2.0-flash"
+
+def _get_gemini_key():
+    """Get Gemini API key from Streamlit secrets or environment."""
+    try:
+        import streamlit as st
+        return st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
+    except Exception:
+        return os.environ.get("GEMINI_API_KEY", "")
 
 FUND_ALIASES = {
     "viking": "VIKING GLOBAL INVESTORS",
@@ -79,91 +89,95 @@ PORTFOLIO_URL_KEYWORDS = [
 
 
 # ---------------------------------------------------------------------------
-# Ollama LLM
+# Google Gemini LLM (free tier)
 # ---------------------------------------------------------------------------
 
-def check_ollama():
-    """Check if Ollama is running and a model is available."""
-    try:
-        resp = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
-        if resp.status_code == 200:
-            models = [m["name"] for m in resp.json().get("models", [])]
-            if any(OLLAMA_MODEL in m for m in models):
-                return True
-            if models:
-                return True
-            return False
-        return False
-    except Exception:
-        return False
+def check_llm():
+    """Check if Gemini API key is configured."""
+    return bool(_get_gemini_key())
 
 
 def get_available_model():
-    """Get the first available Ollama model."""
-    try:
-        resp = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
-        if resp.status_code == 200:
-            models = resp.json().get("models", [])
-            if models:
-                for m in models:
-                    if OLLAMA_MODEL in m["name"]:
-                        return m["name"]
-                return models[0]["name"]
-    except Exception:
-        pass
-    return OLLAMA_MODEL
+    """Return the Gemini model name."""
+    return GEMINI_MODEL
 
 
 def llm_generate(prompt, system_prompt=None):
-    """Generate text using Ollama. Returns full text (no streaming)."""
-    model = get_available_model()
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "options": {"temperature": 0.7, "num_predict": 500},
-    }
+    """Generate text using Google Gemini API. Returns full text."""
+    api_key = _get_gemini_key()
+    if not api_key:
+        return ""
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={api_key}"
+
+    contents = []
     if system_prompt:
-        payload["system"] = system_prompt
+        contents.append({"role": "user", "parts": [{"text": system_prompt}]})
+        contents.append({"role": "model", "parts": [{"text": "Understood. I will follow these instructions."}]})
+    contents.append({"role": "user", "parts": [{"text": prompt}]})
 
     try:
         resp = requests.post(
-            f"{OLLAMA_URL}/api/generate",
-            json=payload,
+            url,
+            headers={"Content-Type": "application/json"},
+            json={
+                "contents": contents,
+                "generationConfig": {
+                    "temperature": 0.7,
+                    "maxOutputTokens": 500,
+                },
+            },
             timeout=120,
         )
-        return resp.json().get("response", "")
+        data = resp.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"]
     except Exception:
         return ""
 
 
 def llm_generate_stream(prompt, system_prompt=None):
-    """Generate text using Ollama with streaming. Yields tokens."""
-    model = get_available_model()
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "stream": True,
-        "options": {"temperature": 0.7, "num_predict": 500},
-    }
+    """Generate text using Gemini API with streaming. Yields tokens."""
+    api_key = _get_gemini_key()
+    if not api_key:
+        yield ""
+        return
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:streamGenerateContent?alt=sse&key={api_key}"
+
+    contents = []
     if system_prompt:
-        payload["system"] = system_prompt
+        contents.append({"role": "user", "parts": [{"text": system_prompt}]})
+        contents.append({"role": "model", "parts": [{"text": "Understood. I will follow these instructions."}]})
+    contents.append({"role": "user", "parts": [{"text": prompt}]})
 
     try:
         resp = requests.post(
-            f"{OLLAMA_URL}/api/generate",
-            json=payload,
+            url,
+            headers={"Content-Type": "application/json"},
+            json={
+                "contents": contents,
+                "generationConfig": {
+                    "temperature": 0.7,
+                    "maxOutputTokens": 500,
+                },
+            },
             stream=True,
             timeout=120,
         )
         for line in resp.iter_lines():
             if line:
-                chunk = json.loads(line)
-                token = chunk.get("response", "")
-                if token:
-                    yield token
-                if chunk.get("done", False):
+                line_str = line.decode("utf-8")
+                if line_str.startswith("data: "):
+                    line_str = line_str[6:]
+                if line_str.strip() == "[DONE]":
                     break
+                try:
+                    chunk = json.loads(line_str)
+                    text = chunk["candidates"][0]["content"]["parts"][0]["text"]
+                    if text:
+                        yield text
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    continue
     except Exception:
         yield ""
 

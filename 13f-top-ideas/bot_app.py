@@ -3,7 +3,7 @@
 13F Filing Analyzer - Chat Bot UI
 
 A Streamlit chat interface that lets users conversationally explore
-hedge fund 13F SEC filings. Uses Ollama (Llama) for AI responses
+hedge fund 13F SEC filings. Uses Google Gemini (free tier) for AI responses
 with RAG (data from SEC EDGAR injected as context).
 
 Usage:
@@ -65,7 +65,7 @@ defaults = {
     "sec_session": None,
     "theses": {},
     "sector_data": {},
-    "ollama_available": None,
+    "llm_available": None,
     "welcomed": False,
     "pending_action": None,
     "wayback_results": None,      # Last wayback tracking result for PDF export
@@ -78,8 +78,8 @@ for k, v in defaults.items():
 
 if st.session_state.sec_session is None:
     st.session_state.sec_session = dt.make_session()
-if st.session_state.ollama_available is None:
-    st.session_state.ollama_available = dt.check_ollama()
+if st.session_state.llm_available is None:
+    st.session_state.llm_available = dt.check_llm()
 
 
 # ---------------------------------------------------------------------------
@@ -615,14 +615,14 @@ with st.sidebar:
     st.title("\U0001F4CA 13F Analyzer")
     st.caption("Chat with SEC EDGAR data")
 
-    # Ollama status
-    if st.session_state.ollama_available:
+    # LLM status
+    if st.session_state.llm_available:
         st.success(f"AI: {dt.get_available_model()}", icon="\u2705")
     else:
-        st.warning("AI: Offline", icon="\u26A0\uFE0F")
-        st.caption("Run `ollama serve` for AI features")
-        if st.button("Retry", key="retry_ollama"):
-            st.session_state.ollama_available = dt.check_ollama()
+        st.warning("AI: No API key", icon="\u26A0\uFE0F")
+        st.caption("Set GEMINI_API_KEY in secrets")
+        if st.button("Retry", key="retry_llm"):
+            st.session_state.llm_available = dt.check_llm()
             st.rerun()
 
     st.divider()
@@ -846,10 +846,10 @@ def process_input(user_input):
 
     # --- Thesis ---
     if intent == "thesis":
-        if not st.session_state.ollama_available:
+        if not st.session_state.llm_available:
             add_msg("assistant",
-                "I need Ollama running to generate investment theses. "
-                "Start it with `ollama serve` and try again."
+                "I need an AI API key to generate investment theses. "
+                "Please set your GEMINI_API_KEY in Streamlit secrets."
             )
             st.rerun()
             return
@@ -885,10 +885,10 @@ def process_input(user_input):
 
     # --- PDF Report ---
     if intent == "report":
-        if not st.session_state.ollama_available:
+        if not st.session_state.llm_available:
             add_msg("assistant",
-                "I need Ollama running to generate the investment theses for the PDF report. "
-                "Start it with `ollama serve` and try again.\n\n"
+                "I need an AI API key to generate the investment theses for the PDF report. "
+                "Please set your GEMINI_API_KEY in Streamlit secrets.\n\n"
                 "*(The PDF includes a thesis for each of the top 20 holdings.)*"
             )
             st.rerun()
@@ -1136,7 +1136,7 @@ def process_input(user_input):
 
     # --- General chat (no fund loaded, just chatting) ---
     if intent == "general_chat":
-        if st.session_state.ollama_available:
+        if st.session_state.llm_available:
             with st.chat_message("assistant"):
                 with st.spinner("Thinking..."):
                     answer = ask_llm_general(params["query"])
@@ -1150,11 +1150,9 @@ def process_input(user_input):
                     "and I'll pull up their latest 13F filing!"
                 )
         else:
-            # No LLM available — give a helpful static response
             add_msg("assistant",
-                "Great question! I'd love to chat about that, but my AI brain (Ollama) "
-                "isn't running right now.\n\n"
-                "**Start it with:** `ollama serve`\n\n"
+                "Great question! I'd love to chat about that, but AI features aren't "
+                "configured yet.\n\n"
                 "In the meantime, I can still do a lot! Try:\n"
                 "- **Load a fund** — just type a name like *\"Viking\"* or *\"Berkshire\"*\n"
                 "- **Track a website** — *\"Who's on the team at a16z.com?\"*\n"
@@ -1165,15 +1163,15 @@ def process_input(user_input):
 
     # --- Free-form question → LLM (fund is loaded) ---
     if intent == "question":
-        if st.session_state.ollama_available and data:
+        if st.session_state.llm_available and data:
             with st.chat_message("assistant"):
                 with st.spinner("Thinking..."):
                     answer = ask_llm(params["query"], data)
             add_msg("assistant", answer)
         else:
             add_msg("assistant",
-                "I'd love to answer that, but Ollama isn't running right now. "
-                "Start it with `ollama serve` for free-form Q&A.\n\n"
+                "I'd love to answer that, but AI features aren't configured yet. "
+                "Set your GEMINI_API_KEY in Streamlit secrets for free-form Q&A.\n\n"
                 "In the meantime, try asking about **holdings**, **sectors**, or **thesis**."
             )
         st.rerun()
