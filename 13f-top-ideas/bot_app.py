@@ -889,28 +889,20 @@ def process_input(user_input):
 
     # --- PDF Report ---
     if intent == "report":
-        if not st.session_state.llm_available:
-            add_msg("assistant",
-                "I need an AI API key to generate the investment theses for the PDF report. "
-                "Please set your GEMINI_API_KEY in Streamlit secrets.\n\n"
-                "*(The PDF includes a thesis for each of the top 20 holdings.)*"
-            )
-            st.rerun()
-            return
-
         with st.chat_message("assistant"):
             st.markdown(f"Generating full PDF report for **{data['fund_name']}**...")
 
-            # Generate theses for any holdings that don't have one yet (or had empty results)
+            # Auto-generate theses for any holdings that don't have one yet
             missing = [h for h in data["top_holdings"]
                        if not st.session_state.theses.get(h["cusip"], "").strip()]
-            if missing:
+            if missing and st.session_state.llm_available:
                 st.markdown(f"Writing investment theses for {len(missing)} positions...")
                 for h in missing:
                     ticker = h["ticker"] or h["name"]
                     with st.spinner(f"Thesis for #{h['rank']} {ticker}..."):
                         thesis = dt.llm_generate_thesis(h, data["fund_name"])
-                        st.session_state.theses[h["cusip"]] = thesis
+                        if thesis and thesis.strip():
+                            st.session_state.theses[h["cusip"]] = thesis
 
             # Generate PDF
             with st.spinner("Compiling PDF..."):
