@@ -104,8 +104,8 @@ def get_available_model():
     return GEMINI_MODEL
 
 
-def llm_generate(prompt, system_prompt=None):
-    """Generate text using Google Gemini API. Returns full text."""
+def llm_generate(prompt, system_prompt=None, _retries=3):
+    """Generate text using Google Gemini API. Retries on rate limit."""
     import logging
     logger = logging.getLogger(__name__)
 
@@ -122,30 +122,40 @@ def llm_generate(prompt, system_prompt=None):
         contents.append({"role": "model", "parts": [{"text": "Understood. I will follow these instructions."}]})
     contents.append({"role": "user", "parts": [{"text": prompt}]})
 
-    try:
-        resp = requests.post(
-            url,
-            headers={"Content-Type": "application/json"},
-            json={
-                "contents": contents,
-                "generationConfig": {
-                    "temperature": 0.7,
-                    "maxOutputTokens": 500,
-                },
-            },
-            timeout=120,
-        )
-        if resp.status_code != 200:
-            logger.error(f"Gemini API error {resp.status_code}: {resp.text[:500]}")
-            return f"[Error: Gemini API returned {resp.status_code}]"
-        data = resp.json()
-        if "candidates" not in data or not data["candidates"]:
-            logger.error(f"Gemini returned no candidates: {data}")
-            return "[Error: Gemini returned no response]"
-        return data["candidates"][0]["content"]["parts"][0]["text"]
-    except Exception as e:
-        logger.error(f"Gemini API exception: {e}")
-        return f"[Error: {e}]"
+    payload = {
+        "contents": contents,
+        "generationConfig": {
+            "temperature": 0.7,
+            "maxOutputTokens": 500,
+        },
+    }
+
+    for attempt in range(_retries):
+        try:
+            resp = requests.post(
+                url,
+                headers={"Content-Type": "application/json"},
+                json=payload,
+                timeout=120,
+            )
+            if resp.status_code == 429:
+                wait = 10 * (attempt + 1)
+                logger.warning(f"Rate limited, waiting {wait}s (attempt {attempt+1}/{_retries})")
+                time.sleep(wait)
+                continue
+            if resp.status_code != 200:
+                logger.error(f"Gemini API error {resp.status_code}: {resp.text[:500]}")
+                return f"[Error: Gemini API returned {resp.status_code}]"
+            data = resp.json()
+            if "candidates" not in data or not data["candidates"]:
+                logger.error(f"Gemini returned no candidates: {data}")
+                return "[Error: Gemini returned no response]"
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception as e:
+            logger.error(f"Gemini API exception: {e}")
+            return f"[Error: {e}]"
+
+    return "[Error: Rate limited after retries — try again in a minute]"
 
 
 def llm_generate_stream(prompt, system_prompt=None):
@@ -195,8 +205,9 @@ def llm_generate_stream(prompt, system_prompt=None):
         yield ""
 
 
-def llm_generate_thesis(holding, fund_name):
+def llm_generate_thesis(holding, fund_name, _delay=4):
     """Generate a 150-200 word investment thesis for a holding."""
+    time.sleep(_delay)  # Respect Gemini free tier rate limit (15 req/min)
     system_prompt = (
         "You are a senior equity research analyst writing concise investment thesis notes. "
         "Write as a thoughtful analyst would - not promotional. "
