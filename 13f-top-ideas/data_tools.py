@@ -28,9 +28,11 @@ def _get_gemini_key():
     """Get Gemini API key from Streamlit secrets or environment."""
     try:
         import streamlit as st
-        return st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
+        if hasattr(st, "secrets") and "GEMINI_API_KEY" in st.secrets:
+            return st.secrets["GEMINI_API_KEY"]
     except Exception:
-        return os.environ.get("GEMINI_API_KEY", "")
+        pass
+    return os.environ.get("GEMINI_API_KEY", "")
 
 FUND_ALIASES = {
     "viking": "VIKING GLOBAL INVESTORS",
@@ -104,9 +106,13 @@ def get_available_model():
 
 def llm_generate(prompt, system_prompt=None):
     """Generate text using Google Gemini API. Returns full text."""
+    import logging
+    logger = logging.getLogger(__name__)
+
     api_key = _get_gemini_key()
     if not api_key:
-        return ""
+        logger.warning("GEMINI_API_KEY not found in secrets or environment")
+        return "[Error: GEMINI_API_KEY not configured]"
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={api_key}"
 
@@ -129,10 +135,17 @@ def llm_generate(prompt, system_prompt=None):
             },
             timeout=120,
         )
+        if resp.status_code != 200:
+            logger.error(f"Gemini API error {resp.status_code}: {resp.text[:500]}")
+            return f"[Error: Gemini API returned {resp.status_code}]"
         data = resp.json()
+        if "candidates" not in data or not data["candidates"]:
+            logger.error(f"Gemini returned no candidates: {data}")
+            return "[Error: Gemini returned no response]"
         return data["candidates"][0]["content"]["parts"][0]["text"]
-    except Exception:
-        return ""
+    except Exception as e:
+        logger.error(f"Gemini API exception: {e}")
+        return f"[Error: {e}]"
 
 
 def llm_generate_stream(prompt, system_prompt=None):
@@ -1307,7 +1320,7 @@ def generate_pdf(holdings, fund_name, report_date, filing_date, total_value,
             pdf.set_font("Helvetica", "", 8)
             thesis = theses.get(h["cusip"], "") or ""
             thesis = thesis.strip()
-            if not thesis:
+            if not thesis or thesis.startswith("[Error:"):
                 thesis = "Thesis not available — AI analysis could not be generated for this position."
             thesis = thesis.encode('latin-1', errors='replace').decode('latin-1')
             pdf.multi_cell(0, 4.5, thesis)

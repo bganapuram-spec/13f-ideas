@@ -874,10 +874,10 @@ def process_input(user_input):
                 st.markdown(f"**#{h['rank']}. {h['name']} ({ticker})**")
                 with st.spinner(f"Writing thesis for {ticker}..."):
                     thesis = dt.llm_generate_thesis(h, data["fund_name"])
-                    if thesis and thesis.strip():
+                    if thesis and thesis.strip() and not thesis.startswith("[Error:"):
                         st.session_state.theses[h["cusip"]] = thesis
                     else:
-                        thesis = "Could not generate thesis. Check your Gemini API key."
+                        thesis = f"Could not generate thesis: {thesis}"
                 st.markdown(thesis)
                 if h != targets[-1]:
                     st.divider()
@@ -892,17 +892,23 @@ def process_input(user_input):
         with st.chat_message("assistant"):
             st.markdown(f"Generating full PDF report for **{data['fund_name']}**...")
 
-            # Auto-generate theses for any holdings that don't have one yet
+            # Auto-generate theses for all holdings before building PDF
             missing = [h for h in data["top_holdings"]
-                       if not st.session_state.theses.get(h["cusip"], "").strip()]
-            if missing and st.session_state.llm_available:
-                st.markdown(f"Writing investment theses for {len(missing)} positions...")
-                for h in missing:
-                    ticker = h["ticker"] or h["name"]
-                    with st.spinner(f"Thesis for #{h['rank']} {ticker}..."):
-                        thesis = dt.llm_generate_thesis(h, data["fund_name"])
-                        if thesis and thesis.strip():
-                            st.session_state.theses[h["cusip"]] = thesis
+                       if not st.session_state.theses.get(h["cusip"], "").strip()
+                       or st.session_state.theses.get(h["cusip"], "").startswith("[Error:")]
+            if missing:
+                if not st.session_state.llm_available:
+                    st.warning("GEMINI_API_KEY not set — PDF will be generated without AI theses.")
+                else:
+                    st.markdown(f"Writing investment theses for {len(missing)} positions...")
+                    for h in missing:
+                        ticker = h["ticker"] or h["name"]
+                        with st.spinner(f"Thesis for #{h['rank']} {ticker}..."):
+                            thesis = dt.llm_generate_thesis(h, data["fund_name"])
+                            if thesis and thesis.strip() and not thesis.startswith("[Error:"):
+                                st.session_state.theses[h["cusip"]] = thesis
+                            else:
+                                st.error(f"Failed for {ticker}: {thesis}")
 
             # Generate PDF
             with st.spinner("Compiling PDF..."):
